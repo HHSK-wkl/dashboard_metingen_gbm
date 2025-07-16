@@ -24,10 +24,39 @@ ws_grens <- st_read("data/ws_grens.gpkg", crs = 28992, quiet = TRUE)
 f_parnaam <- maak_opzoeker(select(parameters, parnr, parnaamlang))
 f_aquopar <- maak_opzoeker(parameters, parnr, aquo_parcode)
 
+kleur_waarde <- function(grenswaarde){
+  
+  function(value){
+    if (is.na(value)) {
+      color <- "#222222"
+      weight <- "normal"
+    } else if (value >= grenswaarde) {
+      color <- "#ff0000"
+      weight <- "bold"
+    } else {
+      color <- "#222222"
+      weight <- "normal"
+    }
+    list(color = color, fontWeight = weight)
+  }
+}
+
+# style = function(value) {
+#   if (value > 0) {
+#     color <- "#008000"
+#   } else if (value < 0) {
+#     color <- "#e00000"
+#   } else {
+#     color <- "#777"
+#   }
+#   list(color = color, fontWeight = "bold")
+# }
+# )
 
 # data-bewerking ----------------------------------------------------------
 
 datum_begin <- floor_date(Sys.Date() %m-% period(80, "days"), unit = "months")
+# datum_begin <- make_date(2025, 1 , 1)
 
 gbm_recent <-
   fys_chem %>%
@@ -48,20 +77,17 @@ gbm_recent <-
                                  ssd_data = toxiciteit,
                                  type_paf = "chronisch")) 
 
-# periode_recent <- glue("van {format(datum_begin, '%e %B %Y')} tot {format(Sys.Date(), '%e %B %Y')}")
+periode_recent <- glue("van {format(datum_begin, '%e %B %Y')} tot {format(Sys.Date(), '%e %B %Y')}")
 
 
 # figuren en tabellen -----------------------------------------------------
 
-gbm_recent %>%
+tabel_recent <-
+  gbm_recent %>%
   arrange(desc(paf_acuut)) %>%
   mutate(naam = str_to_sentence(naam),
-         waarde = map2_chr(waarde, eenheid, 
-                           ~paste(format(signif(.x, 3), decimal.mark = ",", scientific = FALSE), .y))) %>% 
-  # mutate(opmaak_acuut = paf_acuut > 0.005,
-  #        opmaak_chronisch = paf_chronisch > 0.005,
-  #        opmaak_ov = ov_factor >= 1,
-  #        opmaak_meetwaarde = opmaak_ov | opmaak_acuut | opmaak_chronisch) %>%
+         waarde = map2_chr(waarde, eenheid, ~paste(format(signif(.x, 3), decimal.mark = ",", scientific = FALSE), .y))) %>% 
+
   select(Stof = naam,
          Meetpunt = mp,
          Datum =  datum,
@@ -72,15 +98,28 @@ gbm_recent %>%
          paf_chronisch,
          # contains("opmaak")
          ) %>%
-  reactable(columns = 
-              list(
-                Meetwaarde = colDef(),
-                ov_factor = colDef(name = "Overschrijdingsfactor norm"),
-                paf_acuut = colDef(name = "PAF (acuut)"),
-                paf_chronisch = colDef(name = "PAF (chronisch)")
-                )
+  reactable(
+    filterable = TRUE,
+    columns = 
+      list(
+        Meetwaarde = colDef(align = "right", filterable = FALSE),
+        ov_factor = colDef(name = "Overschrijdingsfactor norm", 
+                           style = kleur_waarde(1),
+                           format = colFormat(locales = "nl-NL", digits = 1),
+                           filterable = FALSE),
+        paf_acuut = colDef(name = "PAF (acuut)",
+                           style = kleur_waarde(0.005),
+                           format = colFormat(locales = "nl-NL", digits = 2, percent = TRUE),
+                           filterable = FALSE
+        ),
+        paf_chronisch = colDef(name = "PAF (chronisch)",
+                               style = kleur_waarde(0.005),
+                               format = colFormat(locales = "nl-NL", digits = 2, percent = TRUE),
+                               filterable = FALSE
+        )
+      )
   )
-  
+
   
   
   
