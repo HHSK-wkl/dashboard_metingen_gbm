@@ -1,0 +1,53 @@
+---
+title: "Metingen gewasbeschermingsmiddelen"
+format: 
+  dashboard:
+    orientation: rows
+brand: "brand/_brand.yml"
+logo: "brand/logo_wit.png"
+css: "css/styles.css"
+execute:
+  echo: false
+  warning: false
+---
+
+```{r code}
+#| file: "R/CODE_dashboard_metingen_gbm.R"
+#| include: false
+```
+
+# Recente metingen
+
+
+##
+
+```{r}
+
+```
+
+Tabel en kaart gekoppeld met crosstalk
+
+
+# Toelichting
+
+## 
+
+###
+
+::: {.card title="Titel"}
+
+De achterliggende data van dit dashboard is bijgewerkt op `r Sys.Date()`.
+
+Vragen over dit dashboard kunnen gestuurd worden aan <rapportage_waterkwaliteit@hhsk.nl> .
+:::
+
+::: {.card title="Toxiciteit (PAF)"}
+De toxiciteit wordt uitgedrukt als de potentieel aangetaste fractie (PAF). Het is het deel van alle soorten dat aangetast kan worden. 
+
+De PAF-acuut gaat over directe effecten op organismen. De PAF-acuut is gebaseerd op EC50-waarden.
+
+De PAF-chronisch gaat over chronische effecten op organismen. De paf-chronisch is gebaseerd op NOEC-waarden.
+:::
+
+
+
