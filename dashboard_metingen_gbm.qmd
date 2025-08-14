@@ -4,31 +4,62 @@ format:
   dashboard:
     orientation: rows
 brand: "brand/_brand.yml"
-logo: "brand/logo_wit.png"
+logo: "www/logo_wit.png"
 css: "css/styles.css"
 execute:
   echo: false
   warning: false
+server: shiny
 ---
 
-```{r code}
-#| file: "R/CODE_dashboard_metingen_gbm.R"
-#| include: false
+```{r setup}
+#| context: setup
+#| output: false
+# Beide at render-time and at server-time
+
+library(shiny)
+library(tidyverse)
+library(HHSKwkl)
+library(leaflet)
+library(glue)
+library(sf)
+library(reactable)
+
 ```
+
 
 # Recente metingen
 
-
 ##
 
+### {.sidebar}
+
 ```{r}
-tabel_recent
-htmltools::HTML(periode_recent)
+#dateRangeInput()
+```
+
+
+###
+
+```{r}
+reactableOutput("tabel_recent")
+# htmltools::HTML(periode_recent)
 ```
 
 ##
 
-Tabel en kaart gekoppeld met crosstalk
+```{r kaart_bij_tabel}
+leafletOutput("kaart")
+
+```
+
+```{r}
+verbatimTextOutput("test")
+verbatimTextOutput("test2")
+
+```
+
+
 
 
 # Toelichting
@@ -53,4 +84,198 @@ De PAF-chronisch gaat over chronische effecten op organismen. De paf-chronisch i
 :::
 
 
+
+```{r server-laad-data}
+#| context: server
+
+source("R/tabel_recent.R")
+
+# Data ----
+
+id_laad_data <- shiny::showNotification("Data wordt geladen", duration = NULL)
+
+meetpunten <- data_online("meetpunten.rds")
+parameters <- data_online("parameters.rds")
+fys_chem <- data_online("fys_chem.rds") 
+
+
+
+transpermethrin <- tibble(parnr = 1324, naam = "trans-permethrin", wns_code = NA_character_,
+                          norm_JGM = NA_real_, norm_MAX = NA_real_, norm_P90 = 0.0002, min_norm = 0.0002)
+
+normen <- data_online("normen.rds") %>% bind_rows(transpermethrin)
+
+toxiciteit <- readxl::read_excel("data/gbm_toxiciteit.xlsx", sheet = "SSDinfo")
+
+# functies ----------------------------------------------------------------
+
+f_parnaam <- maak_opzoeker(select(parameters, parnr, parnaamlang))
+f_aquopar <- maak_opzoeker(parameters, parnr, aquo_parcode)
+
+datum_begin <- floor_date(Sys.Date() %m-% period(80, "days"), unit = "months")
+
+gbm_recent <- reactive({
+  fys_chem %>%
+  filter(parnr > 999, parnr < 2000,
+         datum >= datum_begin) %>%
+  filter(is.na(detectiegrens)) %>% # Niet aangetroffen stoffen zijn niet zo relevant
+  left_join(normen) %>%
+  mutate(naam = f_parnaam(parnr)) %>% 
+  mutate(ov_factor = waarde / min_norm) %>%
+  mutate(paf_acuut = paf_gbm(f_aquopar(parnr),
+                             concentratie = waarde,
+                             detectiegrens = detectiegrens,
+                             ssd_data = toxiciteit,
+                             type_paf = "acuut"),
+         paf_chronisch = paf_gbm(f_aquopar(parnr),
+                                 concentratie = waarde,
+                                 detectiegrens = detectiegrens,
+                                 ssd_data = toxiciteit,
+                                 type_paf = "chronisch")) 
+  
+})
+
+meetpunten_kaart <- reactive({
+  meetpunten %>% 
+    semi_join(gbm_recent(), by = "mp") %>% 
+    st_as_sf(coords = c("x", "y"), crs = 28992) %>% 
+    st_transform(crs = 4326) %>% 
+    mutate(geselecteerd = FALSE)
+})
+
+periode_recent <- glue("van {format(datum_begin, '%e %B %Y')} tot {format(Sys.Date(), '%e %B %Y')}")
+
+shiny::removeNotification(id_laad_data)
+
+
+```
+
+```{r server-tabel}
+#| context: server
+
+output$tabel_recent <- renderReactable({
+  
+  data_recent_tabel <- gbm_recent()
+  
+  if (mp_sel_kaart() != "") data_recent_tabel <- filter(data_recent_tabel, mp == mp_sel_kaart())
+  
+  tabel_recent(data_recent_tabel)
+  
+  })
+
+mp_sel_tabel <- reactive({
+  
+  if (is.null(getReactableState("tabel_recent")$selected)) {
+    mp_selected <- NULL
+  } else {
+    mp_selected <-
+    gbm_recent()[getReactableState("tabel_recent")$selected,] %>%
+    pull(mp)
+  }
+  
+  mp_selected
+})
+
+
+```
+
+
+```{r server-kaart}
+#| context: server
+
+pal_sel <- colorFactor(c(blauw, oranje), domain = c(FALSE, TRUE))
+
+markers_custom <- function(data, ...){
+  addCircleMarkers(data = data, 
+                   label = ~mp, 
+                   color = ~pal_sel(geselecteerd),
+                   layerId = ~mp,
+                   stroke = FALSE,
+                   fillOpacity = 1,
+                   ...)
+}
+
+# Intiele start van de kaart 
+output$kaart <- renderLeaflet({
+  
+  basiskaart() %>% 
+    addPolylines(data = ws_grens_wgs, color = "grey", opacity = 1, weight = 2) %>% 
+    leaflet.extras::addFullscreenControl() %>% 
+    markers_custom(data = meetpunten_kaart())
+})
+
+# Geselecteerd meetpunt op kaart aan en uitzetten
+mp_sel_kaart <- reactiveVal("")
+observeEvent(
+  input$kaart_marker_click$id,
+  {
+    if (mp_sel_kaart() == input$kaart_marker_click$id) {
+      mp_sel_kaart("")
+    } else {
+      mp_sel_kaart(input$kaart_marker_click$id)
+    }
+  })
+
+listen_sel_events <- reactive(list(mp_sel_tabel(), mp_sel_kaart()))
+
+# Update kaart obv tabelselectie of meetpuntselectie
+observeEvent(eventExpr =  listen_sel_events(),
+  {
+    # if (is.null(mp_sel_tabel())) {
+      meetpunten_kaart_sel <- meetpunten_kaart()
+    # } else {
+    #   meetpunten_kaart_sel <- meetpunten_kaart() %>% filter(mp == mp_sel_tabel()) 
+    # }
+    
+     if (mp_sel_kaart() != "") {
+      meetpunten_kaart_sel <- 
+        meetpunten_kaart_sel %>% 
+        mutate(geselecteerd = mp == mp_sel_kaart())
+     } 
+    
+    if (!is.null(mp_sel_tabel())) {
+      meetpunten_kaart_sel <- 
+        meetpunten_kaart_sel %>% 
+        mutate(geselecteerd = mp == mp_sel_tabel())
+    } 
+
+    leafletProxy("kaart", session = session) %>% 
+      clearMarkers() %>% 
+      markers_custom(data = meetpunten_kaart_sel)
+      # addCircleMarkers(data = meetpunten_kaart_sel, layerId = ~mp, label = ~mp, color = ~pal_sel(geselecteerd))
+  },
+  ignoreNULL = FALSE, ignoreInit = TRUE
+)
+
+# Update kaart obv klikken meetpunt - andere kleur geselecteerd punt
+# observeEvent(eventExpr = mp_sel_kaart(),
+#   {
+#     if (is.null(mp_sel_tabel())) {
+#       meetpunten_kaart_sel <- meetpunten_kaart()
+#     } else {
+#       meetpunten_kaart_sel <- meetpunten_kaart() %>% filter(mp == mp_sel_tabel()) 
+#     }
+#    
+#     if (mp_sel_kaart() != "") {
+#       meetpunten_kaart_sel <- 
+#         meetpunten_kaart_sel %>% 
+#         mutate(geselecteerd = mp == mp_sel_kaart())
+#     } 
+# 
+#     leafletProxy("kaart", session = session) %>% 
+#       clearMarkers() %>% 
+#       markers_custom(data = meetpunten_kaart_sel)
+#       # addCircleMarkers(data = meetpunten_kaart_sel, layerId = ~mp, label = ~mp, color = ~pal_sel(geselecteerd))
+#   },
+#   ignoreNULL = FALSE, ignoreInit = TRUE
+# )
+
+
+
+
+
+output$test <- renderPrint({mp_sel_kaart()})
+output$test2 <- renderPrint({input$kaart_marker_click})
+
+```
 
