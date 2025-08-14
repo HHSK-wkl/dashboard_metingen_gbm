@@ -32,26 +32,36 @@ library(reactable)
 
 ##
 
-### {.sidebar}
+### 
+
+#### {.toolbar}
 
 ```{r}
-#dateRangeInput()
+datum_begin <- floor_date(Sys.Date() %m-% period(80, "days"), unit = "months")
+dateRangeInput("periode", "Periode", start = datum_begin, language = "nl", separator = " t/m ", format = "dd-mm-yyyy" )
 ```
 
 
-###
+
+#### Column
 
 ```{r}
+#| title: "Aangetroffen gewasbeschermingsmiddelen"
 reactableOutput("tabel_recent")
 # htmltools::HTML(periode_recent)
 ```
 
-##
+
+### Column
+
+#### Row
 
 ```{r kaart_bij_tabel}
 leafletOutput("kaart")
 
 ```
+
+#### Row
 
 ```{r}
 verbatimTextOutput("test")
@@ -153,13 +163,17 @@ shiny::removeNotification(id_laad_data)
 ```{r server-tabel}
 #| context: server
 
+gbm_recent_filtered <- reactive({
+  gbm_recent_filtered <- gbm_recent()
+  
+  if (mp_sel_kaart() != "") gbm_recent_filtered <- filter(gbm_recent_filtered, mp == mp_sel_kaart())
+  
+  gbm_recent_filtered
+})
+
 output$tabel_recent <- renderReactable({
   
-  data_recent_tabel <- gbm_recent()
-  
-  if (mp_sel_kaart() != "") data_recent_tabel <- filter(data_recent_tabel, mp == mp_sel_kaart())
-  
-  tabel_recent(data_recent_tabel)
+    tabel_recent(gbm_recent_filtered())
   
   })
 
@@ -169,7 +183,7 @@ mp_sel_tabel <- reactive({
     mp_selected <- NULL
   } else {
     mp_selected <-
-    gbm_recent()[getReactableState("tabel_recent")$selected,] %>%
+    gbm_recent_filtered()[getReactableState("tabel_recent")$selected,] %>%
     pull(mp)
   }
   
